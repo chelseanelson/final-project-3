@@ -1,0 +1,144 @@
+---
+title: "Progress Memo 2"
+
+subtitle: |
+  | Final Project 
+  | Data Science 3 with R (STAT 301-3)
+
+author:
+  - name: Claire Derksen
+  - name: Chelsea Nelson
+  - name: Sheena Tan
+  - name: Atziry Villeda-Santiago
+
+pagetitle: "Progress Memo 2"
+
+date: today
+
+format:
+  html:
+    toc: true
+    toc-location: left
+    embed-resources: true
+    
+execute:
+  echo: false
+  warning: false
+
+from: markdown+emoji 
+reference-location: margin
+citation-location: margin
+---
+
+::: {.callout-tip icon="false" appearance="simple"}
+## Github Repo Link
+
+[Final Project Github Repo](https://github.com/stat301-3-2024-spring/final-project-3-accs)
+:::
+
+```{r}
+#| label: loading-packages
+#| echo: false 
+
+library(here)
+library(tidyverse)
+library(tidymodels)
+library(knitr)
+
+```
+
+# Introduction
+
+Since Progress Memo 1, our group has trained all of our initial models as planned (except the ensemble model) and will be choosing three final models for further feature engineering, training, and final model selection. More details about our analysis plan, including the recipes we used, models we tuned, and our assessment metric, can be found below.
+
+## Analysis Plan
+
+**Data Splitting**: The dataset was split into training and testing sets using a 75-25 split. 
+
+**Resampling Technique**: Cross-validation was employed using 10 folds with 5 repeats to robustly estimate the models' performance and account for potential variability in the data. Thus each model type will be fitted 50 times.  
+
+**Model Types**: We have selected to use the Naive Bayes (baseline), Random Forest, $k$-Nearest Neighbors, Single-Layer Neural Network, Ensemble, MARS, SVM Polynomial, SVM Radial, and Elastic Net models for our model analysis. 
+
+
+## Recipes 
+
+### recipe_naivebayes 
+
+This recipe was used for our baseline model, the Naive Bayes model.
+
+- `step_novel()`: Used to place all new levels found during the testing stage within the same level
+- `step_other()`: Used specifically for the country variable
+- `step_nzv()`: Used to take care of any variables that do not see any variability within the different instances 
+- `step_normalize()`: Used to change all numeric data to have a mean of zero and a standard deviation of one to ensure that different variables contribute equally
+
+### recipe_para 
+
+This recipe was used for our parametric models.
+
+- `step_novel()`: Used to place all new levels in categorical variables found during the testing stage within the same level
+- `step_other()`: Used to place any level within a categorical variable that represents less than 5% of the instances into an other level 
+- `step_corr()`: Used to take care of any predictor variables that heavily correlated to each other, - setting the threshold to 0.9
+- `step_dummy()`: Used to transform nominal variables into numerical variables for easier computation within the models
+- `step_nzv()`: Used to take care of any variables that do not see any variability within the different instances 
+- `step_normalize()`: Used to change all numeric data to have a mean of zero and a standard deviation of one to ensure that different variables contribute equally
+
+### recipe_nonpara
+
+This recipe was used for our non-parametric models.
+
+- `step_novel()`: Used to place all new levels in categorical variables found during the testing stage within the same level
+- `step_other()`: Used to place any level within a categorical variable that represents less than 5% of the instances into an other level 
+- `step_corr()`: Used to take care of any predictor variables that heavily correlated to each other, setting the threshold to 0.9
+- `step_dummy()`: Used to transform nominal variables into numerical variables for easier computation within the models, used one hot coding to improve model interpretability for the nonparametric/tree-based models
+- `step_nzv()`: Used to take care of any variables that do not see any variability within the different instances 
+- `step_normalize()`: Used to change all numeric data to have a mean of zero and a standard deviation of one to ensure that different variables contribute equally
+
+### Further feature engineering
+
+For future recipes, we plan to tune `step_pca()` for the models that could benefit from it (Single-Layer NN, SVM Radial, SVM Poly).
+
+
+## Assessment Metric 
+
+The primary assessment metric for the analysis will be **roc_auc** or area under the ROC curve. It evaluates the model’s ability to correctly distinguish between the positive class and the negative class  across all threshold levels, providing a single scalar value that summarizes this performance. A higher AUC indicates better discriminatory power, with 1.0 being perfect and 0.5 indicating no better than random guessing.
+
+
+## Models Fitted/Tuned and Results
+
+The initial models that we have developed and fitted/tuned all of the following model types so far: baseline Naive Bayes, Elastic Net, $k$-Nearest Neighbors, Random Forest models. A full overview of the creation and fitting of all of these models can be found in the `rscripts/` folder.
+
+- **Naive Bayes**: No hyperparameters, thus no tuning needed. This model was fit using 7 cores. 
+- **Elastic Net**: Tuned `penalty()` and `mixture()` with the default parameters. This model was tuned using 7 cores. Furthermore, it was tuned on a regular grid with 5 levels. 
+- **SVM Radial**: Tuned `cost()` and `rbf_sigma()` with the default parameters. This model was tuned using 7 cores. Furthermore, it was tuned on a latin hypercube grid of size 30. 
+- **Random Forest**: Tuned `min_n()` with default parameters, `mtry()` with updated parameters set from (20,40), and set `trees()` = 1000. This model was tuned using 26 cores. Furthermore, it was tuned on a regular grid with 5 levels. 
+- **$k$-Nearest Neighbors**: Tuned `neighbors()` with the default parameters. This model was tuned using 26 cores. Furthermore, it was tuned on a regular grid with 5 levels. 
+- **Neural Network**:  Tuned `hidden_units()` and `penalty()`. This model was tuned using 7 cores. It was tuned on a latin hypercube grid of size = 30.
+- **Multivariate Adaptive Regression Splines (MARS)**: Tuned `num_terms()` and `prod_degree()`. This model was tuned using 7 cores. It was tuned on a latin hypercube grid of size = 30.
+
+Full model analyses of these models can be found in `rscripts/4_model_analysis.R`; however, we have provided the associated assessment metric values for each model below. 
+
+
+```{r, echo = FALSE}
+library(gt)
+load(file = here("results/initial_results.rda"))
+
+initial_results |> 
+  gt() |> 
+  tab_header(
+    title = md("**ROC of Initial Models**"),
+    subtitle = md("`runtime` in seconds")
+  )
+```
+
+Runtimes of NA represent that runtime was not collected when fitting the model. This information will be included in the final report. 
+
+Out of the initial models trained, the **Random Forest** model performed the best, with an average ROC of **0.933**. The **SVM** models and **Neural Network** model also performed well, with average ROCs of **0.900+** but the runtime of the SVM model was almost *100 times longer* than the Neural Network was, suggesting that the Neural Network could be a better choice.
+
+## Summary of Progress 
+
+In terms of our current progress, we will finish tuning the ensemble model using the three best performing initial models (RF, SVM, NNET), and then select three models in which we would like to move on to the next stage. From here, we will create more heavily featured engineered recipes, as well as seeing what elements we can take from these first models to tune and apply better model building techniques to our “final” three models. 
+
+Because different models took vastly different amounts of time to run, we also plan to rerun these models and compare their runtimes using tic-toc. These durations will then also inform our choice of our “final” three models. If two models perform similarly, for example, but one took minutes while the other took hours, we would pick the one with the shorter runtime. This shorter runtime can let us do more advanced feature engineering and modifications.
+
+Lastly, no significant issues are currently anticipated for my modeling process, however as stated above due to potential tuning and computational  issues, we decided to run the SVM polynomial and radial models on a latin hypercube grid rather than the regular grid. 
+

@@ -1,0 +1,567 @@
+---
+title: "Can hotels predict if you’ll cancel? Modeling with real hotel booking data"
+
+subtitle: |
+  | Final Report 
+  | Final Project
+  | Data Science 3 with R (STAT 301-3)
+
+author:
+  - name: Claire Derksen
+  - name: Chelsea Nelson
+  - name: Sheena Tan
+  - name: Atziry Villeda-Santiago
+
+pagetitle: "Final Report"
+
+date: today
+
+format:
+  html:
+    toc: true
+    toc-location: left
+    embed-resources: true
+    
+execute:
+  echo: false
+  warning: false
+
+from: markdown+emoji 
+reference-location: margin
+citation-location: margin
+---
+
+::: {.callout-tip icon="false"}
+## Github Repo Link
+
+[Final Project Github Repo](https://github.com/stat301-3-2024-spring/final-project-3-accs/tree/main)
+:::
+
+```{r}
+#| label: loading-packages
+
+library(here)
+library(tidyverse)
+library(tidymodels)
+library(knitr)
+library(gt)
+library(stacks)
+library(DT)
+
+# handle common conflicts
+tidymodels_prefer()
+
+#load ensemble 
+load(here("results/fitted_tuned_models/ensemble/hotel_fit.rda"))
+load(here("results/fitted_tuned_models/ensemble/tuned_nnet.rda"))
+load(here("results/fitted_tuned_models/ensemble/tuned_rf.rda"))
+load(here("results/fitted_tuned_models/ensemble/tuned_svm_poly.rda"))
+```
+
+# Introduction
+
+## Overview
+
+The hotel industry serves over **1.4 billion people** and makes close to **\$285 billion** a year, accounting for almost 10% of worldwide GDP [^1]. However, a shared challenge that hotels face across the globe is *filling and ensuring the continued use of their rooms*. Especially with the growing success of AirBnb and other housing rental companies, maintaining a growth of reservations at a steady rate has become an issue top-of-mind.
+
+[^1]: [https://www.statista.com/topics/1102/hotels/#topicOverview](https://www.statista.com/topics/1102/hotels/#topicOverview)
+
+Through the use of machine learning and modeling, hotels are able to gain helpful and informative insight into how to develop and retain business, determine what their customers value in today’s economy, and select which clientele to focus on marketing to.
+
+This project uses **real** hotel businesses' information to make predictions about the likelihood a hotel reservation will be canceled with validity, providing a model that can help to inform decision-making for actual hotel companies and franchises.
+
+## Prediction Problem
+
+For this project, our prediction objective is to classify if a hotel reservation will be canceled given characteristics of the booking and hotel stay. The objective is a classification problem with two levels that a reservation could be defined as: canceled or not canceled.
+
+## Data Source
+
+This project makes use of the Hotel Booking Demand [^2] dataset sourced from Kaggle by user Jesse Mostipak, which looks at different aspects of bookings from two types of hotels: City (H1) and Resort (H2). The data is originally from the article "Hotel Booking Demand Datasets" [^3], written by Nuno Antonio, Ana Almeida, and Luis Nunes for *Data in Brief*, Volume 22, published in February of 2019.
+
+[^2]: Kaggle Hotel Booking Demand Dataset [(see website)](https://www.kaggle.com/datasets/jessemostipak/hotel-booking-demand)
+
+[^3]: Antonio, N., de Almeida, A., & Nunes, L. (2019). Hotel booking demand datasets. *Data in Brief*, 22, 41–49. <https://doi.org/10.1016/j.dib.2018.11.126>
+
+The dataset contains 32 variables describing the 40,060 observations of H1 and 79,330 observations of H2, where each observation represents a hotel booking made between July 1, 2015 and August 31, 2017. This dataset draws upon real hotel data, so all identifiable guest information has been removed.
+
+# Data Overview
+
+The original dataset contains a total of **119,390 observations** and **32 variables**. Of these variables, there are 13 character variables, 1 date variable and 18 numeric variables. Upon an initial inspection of the data, we found that there is missingness in one variable, `children`, though only 4 observations are missing. Upon a first exploration of the target variable, we noted there was an imbalance and decided to downscale the data. To explore the original dataset, please refer to the Kaggle Hotel Booking Demand Dataset.
+
+The downscaled dataset, `hotel_small` has a total of 3000 observations and 28 variables. Additionally, we made the decision to remove redundant variables such as `reservation_status_date`, `agent`, `company` and `reservation_status`. This gave us a total of 11 factor variables and 17 numerical variables to work with.
+
+```{r}
+#| label: load-data 
+
+# downsampled data 
+hotel_small <- read_rds("data/hotel_small.rds")
+```
+
+#### Hotel Data Downsampled Example
+
+```{r}
+datatable(
+  head(hotel_small, 40), 
+  options = list(server = TRUE), 
+  class = 'cell-border stripe'
+  )
+```
+
+## Target Variable
+
+We conducted an analysis of the target variable `is_canceled` and found that it had no missingness, but was unbalanced. This was handled by downsampling the data, as previously noted.
+
+![](images/canceled_og_distribution_plot.png)
+
+After downsampling, we had a balanced target variable shown below:
+
+![](images/canceled_balanced_distribution_plot.png)
+
+After downsampling and splitting our data into a training and testing set, we took a random sample of the training data and did univariate and bivariate analysis of our data.
+
+## Univariate Analysis
+
+A few of the variables that stood out in EDA are noted below.
+
+![Lead Time](images/univariate_plots/lead_time.png){#fig-plot1}
+
+In @fig-plot1 we note that the distribution of lead time is right skewed. Lead time indicates the time between a booking is in the system and the arrival date. As we can see, most observations fall under 100 days. Bookings that are made far in advance may be more likely to be canceled while bookings with a shorter lead time are less likely to be canceled.
+
+![Repeated Guest](images/univariate_plots/is_repeated_guest.png){#fig-plot2}
+
+In @fig-plot2 we note that most people in the dataset are not repeated guests, denoted by a 0 in the plot. Whether a guest is a returning guest likely influences their possibility of cancelling a booking.
+
+![Deposit Type](images/univariate_plots/deposit_type.png){#fig-plot3}
+
+In @fig-plot3, we note that there are 3 kinds of deposit types. Most deposit types are no deposit. This can contribute to whether a person decides to cancel a booking. Bookings with no deposit may be easier to cancel, hence making it more likely that a person will choose to cancel.
+
+![Booking Changes](images/univariate_plots/booking_changes.png){#fig-plot4}
+
+In @fig-plot4, we note that that most people make 0 booking changes. Booking changes can influence wether a person ends up cancelling. For instance, a person that changes a booking more than 2 times is likely indecisive/unsatisfied, which can lead to a booking cancellation.
+
+## Bivariate Analysis
+
+![Customer Type](images/bivariate_plots/customer_type.png){#fig-plot5}
+
+In @fig-plot5, we note the 4 kinds of customers that make bookings. It appears that within each type of customer, those who cancel and those who do not cancel are about 50/50. However, for those in groups, we see that nearly all people never cancel a booking.
+
+![Deposit Type](images/bivariate_plots/deposit_type.png){#fig-plot6}
+
+In @fig-plot6, we see that those who booked a room that was non-refundable ended up canceling their booking. This is surprising as one would expect non-refundable bookings to be less likely to be canceled. For reservations with no deposit, the ratio of those who cancel/do not cance is more 50/50.
+
+![Lead Time](images/bivariate_plots/lead_time.png){#fig-plot7}
+
+In @fig-plot7, we see that for reservations that were canceled, the average lead time was slightly above 100 while for those that did not cancel, it was under 50 days. This could indicate that the longer the time between date of booking and arrival date, the more likely a person is to cancel.
+
+![Market Segment](images/bivariate_plots/market_segment.png){#fig-plot8}
+
+In @fig-plot8, we note the differences in cancellations among market segments. For online TA, the decision to cancel/not cancel was 50/50 but for those in groups and direct, there was more of a difference. This can be important in discerning whether market type influences the decision to cancel a booking.
+
+## Correlation
+
+Additionally, we made a correlation plot to further understand the relationships among numeric variables in the dataset.
+
+![Correlation Plot](images/correlation_plot.png){#fig-plot9}
+
+In @fig-plot9, we see that most numeric variables in the dataset have little to no correlation with one another. However, `lead_time` appears to have a moderate positive correlation with `arrival_date_weak_number` and `previous_cancellations`. Additionally, `adults`, `children` and `babies` show moderate correlations, which makes sense as families often travel together.
+
+# Methods {#sec-methods}
+
+## Splitting and Models
+
+This is a classification problem where we are trying to predict whether a hotel reservation was canceled. 
+
+We split our data using a 75-25 training-testing split, and for resampling we used v-fold cross validation with 10 folds and 5 repeats. The metric we are using to evaluate performance is ROC_AUC (receiver operator curve area under the curve) which measures a model's ability to distinguish between classes. It is on a scale from 0 to 1, with 1 being the ROC_AUC of a perfect model. We used the following model types: naive bayes, elastic net, radial SVM, polynomial SVM, random forest, K-nearest neighbors, neural network, MARS, and an ensemble model. 
+
+More information on each model type can be found below:
+
+* **Naive Bayes**
+    + Model Type: *baseline*
+    + Description: classification model based on Bayes' Theorem
+    + Parameters Tuned:
+        - none
+* **Elastic Net**
+    + Model Type: *parametric*
+    + Description: logistic regression model that combines penalties from lasso and ridge models
+    + Parameters Tuned:     
+        -   `penalty`: amount of regularization
+        -   `mixture`: how penalties are combined (0 = ridge, 1 = lasso)  
+* **Radial Support Vector Machine (SVM)**
+    + Model Type: *parametric*
+    + Description: support vector machine that separates classes using a radial hyperplane
+    + Parameters Tuned:     
+        -   `cost`: cost of predicting right or wrong class           
+        -   `rbf_sigma`: radius of influence (small = complex boundary)      
+* **Polynomial SVM**
+    + Model Type: *parametric*
+    + Description: support vector machine that separates classes using a polynomial hyperplane 
+    + Parameters Tuned:     
+        -   `cost`: cost: cost of predicting right or wrong class    
+        -   `degree`: degree of polynomial function
+        -   `scale_factor`: scaling of function (large = complex boundary)
+* **Random Forest**
+    + Model Type: *non-parametric*
+    + Description: combination of multiple decision trees
+    + Parameters Tuned:     
+        -   `mtry`: number of sampled predictors (tuning range of (20,40))         
+        -   `trees`: number of trees (set to 1000) 
+        -   `min_n`: minimum number of data points needed to create a split    
+* $k$ **-Nearest Neighbors**
+    + Model Type: *non-parametric*
+    + Description: classifies point based on the majority class of nearest other points
+    + Parameters Tuned:     
+        -   `neighbors`: number of nearby points sampled         
+* **Neural Network (mlp)**
+    + Model Type: *non-parametric*
+    + Description: multi-layer perception model 
+    + Parameters Tuned:     
+        -   `penalty`: amount of regularization    
+        -   `hidden_units`: number of hidden units in each layer
+* **MARS**
+    + Model Type: *non-parametric*
+    + Description: multivariate adaptive regression splines partition predictor space into different regions that are fit independently 
+    + Parameters Tuned:     
+        -   `num_terms`: number of features retained 
+        -   `prod_degree`: highest possible interaction degree
+* **Ensemble**
+    + Model Type: *model stack*
+    + Description: combination of the outputs of three models (rf, nnet, svm_poly)
+    + Parameters Tuned:     
+        -   `penalty`: total amount of regularization (tuned using numeric vector of specific values)
+
+For all models except random forest and ensemble, we used the default ranges for parameter tuning. For random forest, we used 40, approximately the square root of predictors, as the upper bound of `mtry` and 20 as the lower bound to avoid sampling too few predictors. The value for `trees` in random forest was chosen because beyond 1000 there is typically less significant model improvement. For the ensemble `penalty` tuning, we used a vector from a previous lab with values ranging from 10^-6^ to 2 . When using regular tuning grids we used 5 levels for each parameter and when using latin hypercube tuning grids we used a size of 30. We chose these values to attempt to minimize run time while effectively evaluating the full range of parameter values.
+
+## Recipes
+
+We developed three initial recipes: naive bayes, parametric, and non-parametric. The steps for the recipe for parametric models is seen in @tbl-para-steps. 
+
++-----------------+------------------+-----------------------------------------------------------------------------------------+
+| issue           | step             | usage                                                                                   |
++=================+==================+=========================================================================================+
+| novel levels    | `step_novel`     | replacing novel factor levels in untrained data to accommodate non-exhaustive variables |
++-----------------+------------------+-----------------------------------------------------------------------------------------+
+| uncommon levels | `step_other`     | collapsing uncommon factor levels to reduce noise                                       |
++-----------------+------------------+-----------------------------------------------------------------------------------------+
+| correlation     | `step_corr`      | remove variables that have high correlation with other variables                        |
++-----------------+------------------+-----------------------------------------------------------------------------------------+
+| format          | `step_dummy`     | convert nominal data into dummy variables                                               |
++-----------------+------------------+-----------------------------------------------------------------------------------------+
+| format          | `step_normalize` | center and scale numeric data                                                           |
++-----------------+------------------+-----------------------------------------------------------------------------------------+
+
+: Initial Parametric Recipe Steps {#tbl-para-steps}
+
+
+The Naive Bayes model did not require `step_corr()` or `step_dummy()` since we didn’t have much interest in improving the performance of the baseline model. The non-parametric differed in that we used one-hot encoding for `step_dummy()` since non-parametric models tend to perform better with data in this format. We did not have any missingness, so there was no need for imputation.
+
+
+# Model Building & Selection
+
+## Model Selection
+
+We evaluated the ROC_AUC of each of the models, looking for models with a score closer to 1. The random forest model performed significantly better than all other models, followed by the SVM models and the neural network.The naive bayes model performed the worst as expected with MARS performing better by a significant amount. Both random forest and SVM models less prone to overfitting which may have contributed to their success. Our large amount of data could have also contributed to the success of the non-parametric models like random forest and the neural network.
+
+```{r}
+#| echo: false
+#| label: tbl-initial-results
+#| tbl-cap: ROC_AUC for Initial Models
+
+load(file = here("results/initial_results.rda"))
+initial_results %>%
+  knitr::kable()
+```
+
+The MARS model performed best with 5 derived predictors. The KNN model performed best with 15 neighbors. The elastic net model performed best with a mixture of 1 and a penalty of 1e-10. Generally, the more lasso-like models and the models with smaller penalties performed better. The neural network performed best at 9 hidden units and a penalty of 9.6e-1. The polynomial SVM performed best at a cost of 0.398, degree of 3, and a scale factor of 0.0260. The radial SVM performed best at a cost of 5.03 and rbf_sigma of 0.012. The random forest model performed best with an 20 randomly sampled predictors and a min_n of 2.
+
+We initially planned on moving forward with the top 3 models but instead chose to move forward with random forest, svm_poly and the neural network. The SVM models use similar methods and neither was significantly better than the other, so we opted for the one with the shorter run time.
+
+
+```{r, comparing-sub-models}
+#| echo: false
+
+load(file = here("results/rf_best.rda"))
+load(file = here("results/svm_poly_best.rda"))
+load(file = here("results/nnet_best.rda"))
+```
+
+## Focused Model Analysis
+
+We planned on further tuning the parameters of the 3 models we selected (rf, svm_poly, nnet). We examined the results from tuning to best determine new parameters.
+
+```{r}
+#| echo: false
+#| label: tbl-rf-best
+#| tbl-cap: Parameters of Top Random Forest Models by ROC
+rf_best
+```
+
+
+![Random Forest Parameter Tuning](images/autoplots/rf_plot.png){#fig-rfplot}
+
+
+@fig-rfplot and @tbl-rf-best show that a minimal node size of 2 consistently performed better than larger node sizes. Because of this we decided to set min_n to 2 moving forward. The models also seem to perform better with less randomly selected predictors. For further tuning we used a range of (0,40) so that we could incorporate smaller numbers of predictors.
+
+```{r}
+#| echo: false
+#| label: tbl-svm-poly-best
+#| tbl-cap: Parameters of Top Polynomial SVM by ROC
+svm_poly_best
+```
+
+![Polynomial SVM Parameter Tuning](images/autoplots/svm_poly_plot.png){#fig-svm-poly-plot}
+
+It is unclear if larger cost performed better so we decided to still use a pretty wide range of (-5,5). The degrees of interaction performed much better at 2 and 3 than at 1 so we used (2,3). The scale factor appeared to improve as it increased so we used a slightly more limited range of (-5,-1).
+
+```{r}
+#| echo: false
+#| label: tbl-nnet-best
+#| tbl-cap: Parameters of Top Neural Network Models by ROC
+nnet_best 
+```
+
+
+![Neural Network Parameter Tuning](images/autoplots/nnet_plot.png){#fig-nnet-plot}
+
+When tuning the polynomial SVM and the neural network we used a latin hypercube tuning grid rather than a regular grid. Because of this it can be harder to isolate patterns to one parameter. The neural network seems to be improving with the number of hidden units but the amount of regularization is harder to analyze.
+
+## Ensemble
+
+The 3 models we selected were also incorporated into the ensemble model. After tuning, the best overall penalty was 0.01 and it incorporated 10 members.
+
+```{r}
+#| echo: false
+#| label: fig-members
+#| fig-cap: Ensemble Model Members
+
+load(file = here("results/fitted_tuned_models/ensemble/hotel_fit.rda"))
+autoplot(hotel_fit, type = "weights")
+autoplot(hotel_fit, type = "members")
+```
+
+Surprisingly the svm_poly model had the largest stacking coefficient despite random forest outperforming it previously.
+
+
+```{r, Assess-ensemble-model}
+#| echo: false
+
+load(file = here("results/fitted_tuned_models/ensemble/svm_params.rds"))
+load(file = here("results/fitted_tuned_models/ensemble/rf_params.rds"))
+load(file = here("results/fitted_tuned_models/ensemble/nnet_params.rds"))
+```
+
+```{r}
+#| echo: false
+#| label: tbl-svm-ensemble
+#| tbl-cap: Polynomial SVM Candidate Model Parameters
+svm_params %>%
+  knitr::kable()
+```
+
+```{r}
+#| echo: false
+#| label: tbl-rf-ensemble
+#| tbl-cap: Random Forest Candidate Model Parameters
+rf_params %>%
+  knitr::kable()
+```
+
+```{r}
+#| echo: false
+#| label: tbl-nnet-ensemble
+#| tbl-cap: Neural Network Candidate Model Parameters
+nnet_params %>%
+  knitr::kable()
+```
+
+Unexpectedly, the parameters of the top SVM models in @tbl-svm-poly-best do not match those found in @tbl-svm-ensemble. This suggests that perhaps the candidate model is providing some information that is uniquely useful when combined with the other two models. The candidate rf model seems to agree that the mtry of 20 is ideal but it is incorporating both a min_n 2 and 40. Despite 40 not appearing in the top models in @tbl-rf-best it has a higher coefficient than the 2 model. The neural network models are similarly difficult to analyze.
+
+The ensemble model had an ROC_AUC of 0.867 and an accuracy of 0.781. Because the ROC_AUC was considerably lower than our best models we decided not to move forward with it.
+
+# Model Refinement
+
+We chose to refine our Neural Network, SVM Polynomial, and Random Forest models as their model types performed the best during our initial model building. In order to refine the models, we decided to employ both refined feature engineering through our recipe building stage as well as refining the tuning parameters based on the best ranges of hyperparameters for the models in round one.
+
+## Recipes
+
+In terms of the recipes, we felt that the current aspects that we had included were good, helping to produce strong metrics. Thus, in addition to the ones mentioned already during the @sec-methods section, the only new step was `step_pca()`, in hopes of improving our model's performance, in terms of handling multicollinearity.
+
++----------------------------------+------------+-----------------------------------------------------------------------------------------------------------------+
+| issue                            | step       | usage                                                                                                           |
++==================================+============+=================================================================================================================+
+| multicollinearity and efficiency | `step_pca` | Transforms original features into a smaller set of uncorrelated principals to reduce the dimensionality of data |
++----------------------------------+------------+-----------------------------------------------------------------------------------------------------------------+
+
+: Refined Parametric Recipe Steps {#tbl-para-steps-refined}
+
+As we did not have a specific idea of the optimal value for the `num_comp` parameter in `step_pca()`, we decided to also include it in our tuning stages of model building. Including `num_comp` in the tuning process allowed us to explore a range of possible values for the number of principal components, ensuring that we identify the optimal number that maximizes model performance.
+
+However, we did only implement and use `step_pca()` with our more parametric refined models (Neural Network and SVM Polynomial) as these models are particularly sensitive to feature dimensionality and mutlicollinearity, compared to our non-parametric Random Forest model that is more robust to these issues, therefore not requiring the application of PCA.
+
+For our Random Forest model associated recipe, instead of using `step_pca()` we employed variable selection techniques through the use of a Lasso Regression model's coefficient results. Thus we ran and fit the Lasso Regression model on our training set, examining the results' coefficients to help identify which variables were important and had influence in the performance of the model, being those with non-zero coefficients. Through gaining this information, we were able to exclude the unimportant variables to refine our recipe through the use of `step_rm()`.
+
++-----------+-----------+--------------------------------------------------------------------------------------------------------------------------------------------+
+| issue     | step      | usage                                                                                                                                      |
++===========+===========+============================================================================================================================================+
+| filtering | `step_rm` | Removes specified variables from the dataset during the preprocessing steps of a recipe, excluding irrelevant variables and reducing noise |
++-----------+-----------+--------------------------------------------------------------------------------------------------------------------------------------------+
+
+: Refined non-parametric Recipe Steps {#tbl-nonpara-steps-refined}
+
+## Refined Tuning Parameters
+
+Our refined tuning parameters were based on results acquired from the initial round of model building. The initial round allowed us to identify the range of our parameter values that would yield the best performances in terms of ROC_AUC.
+
+### Neural Network Model
+
+Initially, we went with the default ranges for the Neural Network `hidden_units` and `penalty` parameters, which we then evaluated using a latin hypercube grid of size 30.
+
+Upon analyzing these initial results, we decided to stick with the default ranges for both parameters as we were worried about the potential overfitting that could occur in correspondence with our refined feature engineered recipe.
+
+Furthermore, in terms of the `num_comp` parameter for our `step_pca()` feature engineering step, we decided to also go with the default range, having our upper bound being 4 as this gave us a small but powerful amount of options allowing for a comprehensive exploration of the principal components' contribution to the performance of our model.
+
+Thus meaning that we used the following ranges for our tuning parameters :
+
+`hidden_units()` ; \[1, 10\]
+
+`penalty()` : \[-10, 0\] on a transformed scale
+
+`num_comp()` : \[1, 4\]
+
+In order to evaluate these tuning parameters, we employed a latin hypercube strategy of the size 30 thus allowing for us to explore various combinations of parameters. We chose these values to attempt to minimize run time while effectively evaluating the full range of parameter values.
+
+### SVM Polynomial Model
+
+Initially, we went with the default ranges for the SVM Polynomial `cost`, `degree`, and `scale_factor` parameters, which we then evaluated using latin hypercube grid of size 30 in order to efficiently sample a diverse set of hyperparameter combinations across the search space, ensuring a more comprehensive and effective optimization.
+
+Upon analyzing these initial results, we observed optimal values for each parameter clustered within specific ranges. We then refined our tuning process by narrowing the search space to these ranges, enabling a more focused and efficient hyperparameter optimization.
+
+Furthermore, in terms of the `num_comp` parameter for our `step_pca()` feature engineering step, we decided to also go with an optimized range, having our lower bound be 4 and our upper bound being 10 as this gave us a nice range of options allowing for a more in depth exploration of the principal components' contribution to the performance of our model.
+
+Thus we now used the following ranges for our tuning parameters :
+
+`cost` : \[-5, 5\] on a transformed scale
+
+`degree` : \[2, 3\]
+
+`scale_factor` : \[-5. -1\] on a transformed scale
+
+`num_comp` : \[4, 10\]
+
+In order to evaluate these tuning parameters, we employed a regular grid strategy thus allowing for us to explore various combinations of parameters. The grid was defined with specific levels for each parameter:
+
+`cost` : 4 levels.
+
+`degree` : 2 levels
+
+`scale_factor` : 5 levels
+
+`num_comp` 4 levels
+
+We chose these values to attempt to minimize run time while effectively evaluating the full range of parameter values.
+
+In comparison to latin hypercube, this approach ensures a comprehensive exploration of the hyperparameter space, increasing the likelihood of finding the optimal combination for maximizing model performance. We aimed to strike a balance between exploration and computational efficiency. Additionally, the regular grid's simplicity facilitated easier interpretation and analysis of results, enhancing our ability to make informed decisions in selecting the optimal model configuration.
+
+### Random Forest Model
+
+Initially, we went with the default ranges for the Random Forest `min_n` parameters, updating the `mtry` parameter to have the range \[20,40\] and setting the `trees` parameter to equal 1000. We then evaluated using a regular grid with 5 levels for each tuned parameter in order to efficiently sample a comprehensive set of hyperparameter combinations across the search space.
+
+Upon analyzing these initial results, we observed optimal values for each parameter clustered within specific ranges. We then refined our tuning process by narrowing the search space to these ranges, enabling a more focused and efficient hyperparameter optimization.
+
+Thus we now used the following ranges/values for our tuning parameters :
+
+`min_n` : 2
+
+`mtry` : \[0, 40\]
+
+`trees` : 1000
+
+In order to evaluate these tuning parameters, we employed a latin hypercube strategy of the size 15 thus allowing for us to explore various combinations of parameters. We chose these values to attempt to minimize run time while effectively evaluating the full range of parameter values.
+
+In comparison to regular grid, this approach ensures faster computational progress, enabling efficient exploration of the hyperparameter space while maintaining comprehensive coverage. Additionally, the flexibility of Latin hypercube sampling allows for tailored sampling strategies, further enhancing its suitability for various optimization tasks.
+
+## Performance Results
+
+As stated in the earlier sections, the primary assessment metric for the analysis is ROC_AUC, helping to compare models and determine which will be the final/winning model. ROC_AUC provides a clear measure of how well the model distinguishes between the two classes.
+
+### Best Parameters
+
+Before comparing our improved model types, it is important to look at the optimal hyperparameters for the factors that we tuned as this could be beneficial in the future to examine and try more combinations to hopefully find and achieve even better predictions and ROC_AUC metric vales. In terms of the different model types. We have listed out what were concluded to be the best parameters for each.
+
+-   Neural Network : `hidden_units` = 8, `penalty` = 2.60e-3, and `num_comp` = 4
+
+-   SVM Polynomial : `cost` = 32, `degree` = 3, `scale_factor` = 0.1, `num_comp` = 10
+
+-   Random Forest : `mtry` = 12
+
+These best tuning parameters are similar to the ones chosen during the initial round of model building, differing only slightly for the `penalty` parameter for the Neural Network model, the `mtry` parameter for the Random Forest model, and the `scale_factor` and `cost` parameters for SVM Polynomial model.
+
+### ROC_AUC Comparison
+
+```{r}
+#| label: improved-results
+#| echo: false
+
+load(here("results/improved_results.rda"))
+
+improved_results %>% 
+  gt() %>% 
+  tab_header(
+    title = md("**ROC of Improved Models**"),
+    subtitle = md("`runtime` in seconds")
+  )
+```
+
+We can see that in comparison to the initial versions of the models, all of the model types got a worse mean ROC_AUC value. With the Random Forest model getting worse by around .022 (Initial ROC_AUC: 0.933), meaning that indicating a slight minor decrease in the model's ability to distinguish between classes correctly, thus being able to distinguish and predict correctly a canceled vs. not canceled hotel reservation.
+
+The SVM Polynomial model got significantly worse reducing its ROC_AUC accuracy by .034 (Initial ROC_AUC: 0.910), meaning that the SVM Polynomial model's performance has notably declined, which suggests a reduced effectiveness in correctly classifying instances, thus being significantly worse than its former counterpart in predicting correctly between a canceled and not canceled hotel reservation.
+
+Lastly, the Neural Network model has the largest difference between the initial models ROC_AUC value and that of our refined model, reducing its ROC_AUC accuracy by .0908 (Initial ROC_AUC: 0.907), meaning that the meaning that the Neural Network model's performance has significantly deteriorated, indicating a substantial drop in its ability to differentiate between positive and negative classes, thus being significantly worse than its former counterpart in predicting correctly between a canceled and not canceled hotel reservation.
+
+Thus could possibly be due to two reasons: 1) Even though we tried to prevent overfitting, our refined ranges were too fit to the initial rounds optimized values, thus producing worse scores as we also now changed around the recipe that we used, 2) How we utilized `step_pca()` and variable selection within our feature engineered made our models worse off, rather than helping.
+
+Future steps that could be taken to help improve our improved models, could be doing a Random Forest model based variable selection process rather than a Lasso regression, as Random Forest models tends to produce more robust metrics, thus being more concise on the important variables to use within our feature engineering pre-processing stage. Furthermore, we could look at larger ranges of `step_pca()` thus seeing if the problem is that the pre-processing step does not work well with our models overall or if we just need to look at a broad range to gain the optimal values from the step. Lastly in a similar light, it would be beneficial to work with broader ranges for our hyperparamters to try and find better optimal values, while also not working to overfit our models.
+
+## Final Model Type Selection
+
+Despite, performing worse than its former counterpart, we will be selecting the improved/refined Random Forest model to act as our final model type selection. This is because we feel that the variable selection although showcasing worsening results in our tuning stage, it will be beneficial when testing the model on unseen data to only include the important variables thus reducing the noise and unnecessary information that could affect the performance and predictions of the Random Forest model in the long run.
+
+Additionally, as will be discussed more deeply in the (@sec-conclusion) section, we learned towards the end of our analysis that the data was all grouped together based on the two levels of our response variable rather than being ungrouped. Thus, this impacted how we analyzed the performance of our models, giving us interesting results when we went to look at the performance of our final model originally, thus we had to go back and ungroup the data. Overall, we saw that once ungrouping the data and rerunning some of the models, the ones that we were able to retest due to time constraints, all got worse. Thus meaning that overall, we could assume that if we were to update all of the models they would also reflect this decrease in their ROC_AUC performance.
+
+Thus, we would prefer to go with the best model that reflects the ungroup data (Refined Random Forest model) rather than comparing the grouped and ungrouped data models.
+
+# Final Model Analysis
+
+After fitting our winning model to the full training and then testing data, we can now assess the final model's performance (Refined Random Forest model) being able to see how well the model generalizes to unseen data by examining its performance metrics on the testing dataset. Thus providing an indication of how well the model is likely to perform in real-world scenarios.
+
+```{r}
+#| label: final-assessment
+#| echo: false 
+
+read_rds(here("results/performance_table.rds")) %>% arrange(desc(estimate)) %>% 
+gt() %>% tab_header(
+title = md("**Final Model Performance**"))
+
+```
+
+**ROC_AUC** : Once again, this metric measures the ability of a model to distinguish between classes. A higher ROC_AUC value indicates a better performance in differentiating between the positive and negative classes. The value of .919 tells us that the model is able to differentiate between positive and negative classes (canceled and not canceled hotel reservations) well, with a \~92% chance that the model will correctly distinguish between a randomly chosen canceled hotel reservation and a randomly chosen not-canceled hotel reservation.
+
+![ROC Curve](results/roc_curve.png){#figure-roccurve} The [ROC curve](@figure-roccurve) also affirms the performance metric value as it showcases to us the performance of the model at all classification thresholds. Since, our ROC curve is close to the upper left corner of the graph, we can then affirm the accuracy of the test because the sensitivity and specificity are almost near 1, showcasing the lack of false negatives or false positives in the predictions made by the model.
+
+**Accuracy** : This metric measures the proportion of instances in which the predicted value was correctly classified. Thus being the ratio of correctly predicted instances to total instances. The value of 0.821 tells us that the model had an accuracy of \~82% in terms of correctly classifying if a hotel reservation would be cancelled or not.
+
+![Confusion Matrix Heatmap](results/heatmap.png){#figure-heatmap}
+
+The [Confusion Matrix](@figure-heatmap) tells us how the Random Forest model's predictions aligned with the truth from the testing set. Thus from the matrix, we can see that the model currently predicted 301 instances where the hotel reservation was canceled, being a true positive, however having 60 instances where it incorrectly predicted a canceled reservation when the reservation actually would not be canceled, being a false positive. From the other side, we see that the model correctly predicted 315 instances where the reservation was not canceled, being a true negative, however there being 74 instances of error, as the model predicted that the reservation would not be canceled when it actually was, creating a false negative. This matrix seems to align similarly with our accuracy and ROC_AUC values.
+
+We think that the final model is of high standards, as the ROC_AUC value did not change terribly from the resampling training data to the test data. However, due to the data creation error realized later on in our model building process, it would be hard to compare our final model to that of our naive bayes model has they are on different data creations (grouped vs. ungrouped data). Thus, it would be beneficial in the future to go back and update all of the models to be represented by the ungrouped data in order to see if the efforts of building a predictive model really pay off, assessing if our final model is actually much better than our baseline naive bayes model. In general however, we do assume that our Random Forest model would perform much better than our baseline naive bayes model, due to the reliability of the model in terms of its scalability and flexibility in processing data it receives as well as it resistance to overfitting, being the best model out of the ones that we chose to use.
+
+# Conclusion {#sec-conclusion}
+
+First, it is important to note that during the downsampling process, we grouped the data using the target variable. We forgot to ungroup the data and so the splitting and training of the models, plus any other steps beyond this point were done using the grouped data. We noticed the mistake when attempting to fit onto the testing data. At this point, we chose to rerun the ensemble model, as well as the improved random forest model using the ungrouped data, provided the lateness of this discovery. One thing we noticed was that the models performed better with the grouped data when compared to the ungrouped data. In the future, we will be careful to note that the data is not grouped.
+
+Overall, this project allowed us to explore the possible predictors that can contribute to whether a person will cancel their booking. This is important in the hotel industry as canceled bookings translates to a loss of revenue. Hotel businesses seek to have a constant influx of bookings, and understanding what can reduce the number of cancellations is essential for business models.
+
+While we did 2 rounds of modeling that included extensive feature engineering and tuning, such as variable selection, we still only reached an ROC_AUC of 0.919 (and accuracy of .821). This indicates that there is still much more room for improvement. One of the things we recommend for future iterations is to first try running all kinds of models with the ungrouped data. Additionally, one could build an ensemble model with all types of models rather than just the top 3 performers like we did, as this may have missed some information. Another method we did not attempt was to run a boosted tree model with a lighgbm engine, which has been shown to work well for classification models. A final recommendation can be to use previous research on what contributes to booking cancellations so that more thoughtful data cleaning and recipe building can be done.
+
+This project also brings up the question of how this data may look in recent years. The dataset used is limited to the years 2015-2017. Trends change and this can influence whether people will choose to cancel their bookings. It would be interesting to see how people make these decisions in recent times, particularly in the post-covid era. Additionally, this dataset does not include the location of where the booking is being made. It is reasonable to assume that a booking in a different country is less likely to be canceled as it takes a lot more preparation and foresight to book an out of country trip. Hence, it would be interesting to see how cancellation trends vary by country and comparing which ones are more successful in retaining bookings.
+

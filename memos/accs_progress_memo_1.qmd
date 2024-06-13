@@ -1,0 +1,103 @@
+---
+title: "Can hotels predict if you’ll cancel? Modeling with real hotel booking data"
+
+subtitle: |
+  | Final Project 
+  | Data Science 3 with R (STAT 301-3)
+
+author:
+  - name: Claire Derksen
+  - name: Chelsea Nelson
+  - name: Sheena Tan
+  - name: Atziry Villeda-Santiago
+
+pagetitle: "Progress Memo 1"
+
+date: today
+
+format:
+  html:
+    toc: true
+    toc-location: left
+    embed-resources: true
+    
+execute:
+  echo: false
+  warning: false
+
+from: markdown+emoji 
+reference-location: margin
+citation-location: margin
+---
+
+::: {.callout-tip icon="false"}
+## Github Repo Link
+
+[Final Project Github Repo](https://github.com/stat301-3-2024-spring/final-project-3-accs/tree/main)
+:::
+
+## Overview
+
+The hotel industry serves over **1.4 billion people** and makes close to **\$285 billion** a year, accounting for **almost 10%** of worldwide GDP. However, a shared challenge that hotels face across the globe is *filling and ensuring the continued use of their room*s. Especially with the growing success of AirBnb and other housing rental companies, maintaining a growth of reservations at a steady rate has become an issue top-of-mind.
+
+Through the use of machine learning and modeling, hotels are able to gain helpful and informative insight into how to develop and retain business, determine what their customers value in today’s economy, and select which clientele to focus on marketing to. 
+
+This project uses *real hotel businesses' information* to make predictions about the likelihood a hotel reservation *will be canceled* with validity, providing a model that can help to inform decision-making for actual hotel companies and franchises.
+
+### Prediction Problem
+
+For this project, our prediction objective is to classify if a hotel reservation will be canceled given characteristics of the booking and hotel stay. The objective is a classification problem with two levels that a reservation could be defined as: canceled or not canceled.
+
+## Data source
+
+This project makes use of the Hotel Booking Demand [^1] dataset sourced from Kaggle by user Jesse Mostipak, which looks at different aspects of bookings from two types of hotels, City (H1) and Resort (H2). The data is originally from the article Hotel Booking Demand Datasets [^2], written by Nuno Antonio, Ana Almeida, and Luis Nunes for *Data in Brief*, Volume 22, February 2019. The dataset contains 32 variables describing the 40,060 observations of H1 and 79,330 observations of H2, where each observation represents a hotel booking made between July 1, 2015 and August 31, 2017. This dataset draws upon real hotel data, so all identifiable guest information has been removed.
+
+[^1]: Kaggle Hotel Booking Demand Dataset ([see website](https://www.kaggle.com/datasets/jessemostipak/hotel-booking-demand)
+
+[^2]: Antonio, N., de Almeida, A., & Nunes, L. (2019). Hotel booking demand datasets. *Data in Brief*, 22, 41–49. <https://doi.org/10.1016/j.dib.2018.11.126>
+
+## Data quality check
+
+The dataset contains a total of **119,390 observations** and **32 variables**. Of these variables, there are 13 character variables, 1 date variable and 18 numeric variables. Upon an initial inspection of the data, we found that there is missingness in one variable, `children`, though only 4 observations are missing.
+
+Some issues might arise with the `country` variable, since it has 178 unique levels. For this, we can use `step_other` to remove the least commonly occurring observations. Additionally, `arrival_data_month`, `reserved_room_type` and `assigned_room_type` each have 10-12 unique levels. Further inspection will have to de done to determine how these levels should best be handled.
+
+## Target variable analysis
+
+![Original distribution of target variable](images/canceled_og_distribution_plot.png)
+
+The target variable has no missingness. There are 75,166 bookings that weren’t canceled and 44,224 bookings that were (around a 7:4 ratio). Since we already will have to downsample due to computational constraints, we can downsample to a 1:1 ratio, as done below.
+
+![Downsampled distribution of target variable](images/canceled_balanced_distribution_plot.png)
+
+## Misc
+
+The variable for country of origin is in **ISO 3155–3:2013 format**, and we looked to find a file that can help to easily convert to a more intelligible form, but we could not find one in the same format. We are planning to use it as is and interpret as needed otherwise.
+
+### Timeline
+- This week (4/21-27) we will make the recipes and write the progress memo.
+-  Next week (4/28-5/4) we will train the 8 initial models (listed below) and the baseline model. 
+-  The following week (5/5-5/11) we will meet to discuss the results of the initial model training, select three semi-final models to train for refinement, and complete variable selection/feature engineering.
+-  The next week (5/12-5/18) we will meet to discuss the results of the semi-final model training, select a final model to train, and write the progress memo.
+-  The final week (5/19-5/25) we will meet to discuss the results of the final training and begin to write the report.
+-  That will leave us with one week to write the executive summary and final report due 6/5.
+
+### Models
+1. Naive Bayes: baseline model
+2. Elastic Net: `logistic_reg()`, `glmnet` engine, parametric, tune `penalty` and `mixture`
+3. SVM Polynomial: `svm_poly()`, `kernlab` engine, parametric, tune `cost` and `degree` and `scale_factor` 
+4. SVM Radial: `svm_rbf()`, `kernlab` engine, parametric, tune `cost` and `rbf_sigma`
+5. MARS: `mars()`,  `earth` engine, parametric, tune `num_terms` and `prod_degree`
+6. KNN: `nearest_neighbor()`, `kknn` engine, non-parametric, tune `neighbors`
+7. Random Forest: `rand_forest()`, `ranger` engine, non-parametric, tune `min_n` and `mtry`, `trees` = 1000
+8. Ensemble: `bag_tree()`, `rpart` engine, non-parametric, tune `tree_depth` and `min_n`
+9. Neural Network: `mlp()`, `nnet` engine, non-parametric, tune `hidden_units` and `penalty`
+
+### Recipes
+Model 1: Baseline recipe, no dummying needed
+Models 2-5: Recipe for parametric, no one-hot encoding
+Models 6-9: Recipe for non-parametric, one-hot needed
+
++ Three semi-final models for refinement for variable selection
++ One final model
+
